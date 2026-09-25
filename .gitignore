@@ -1,0 +1,40 @@
+# Swift Package Manager e Xcode
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcresult/
+*.xcarchive/
+*.dSYM/
+
+# Pacotes e binários gerados
+dist/
+*.app/
+*.dmg
+*.pkg
+*.ipa
+
+# Dados locais do monitor e diagnósticos
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+*.ips
+
+# Configuração e credenciais locais
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# macOS e editores
+.DS_Store
+._*
+*.swp
+*~
