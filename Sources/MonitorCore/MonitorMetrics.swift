@@ -24,6 +24,14 @@ public struct MonitorTemperaturePoint: Sendable, Identifiable {
     public var id: Date { date }
 }
 
+public struct MonitorTemperatureStatistics: Sendable, Identifiable {
+    public let id: String
+    public let minimumCelsius: Double
+    public let averageCelsius: Double
+    public let maximumCelsius: Double
+    public let sampleCount: Int
+}
+
 public struct MonitorExternalPowerPoint: Sendable, Identifiable {
     public let date: Date
     public let inputWatts: Double?

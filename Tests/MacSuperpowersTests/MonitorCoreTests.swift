@@ -95,11 +95,22 @@ final class MonitorCoreTests: XCTestCase {
         let temperatures = try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300))
         XCTAssertEqual(temperatures.count, 1)
         XCTAssertEqual(temperatures[0].celsius, 63.4, accuracy: 0.001)
+        try store.insertTemperatures([
+            MonitorTemperature(id: "SMC:TCMz", celsius: 66.6, source: 1)
+        ], date: date.addingTimeInterval(360))
+        let thermalStats = try store.loadTemperatureStatistics(since: date.addingTimeInterval(-300))
+        let cpuStats = try XCTUnwrap(thermalStats.first { $0.id == "SMC:TCMz" })
+        XCTAssertEqual(cpuStats.minimumCelsius, 63.4, accuracy: 0.001)
+        XCTAssertEqual(cpuStats.averageCelsius, 65, accuracy: 0.001)
+        XCTAssertEqual(cpuStats.maximumCelsius, 66.6, accuracy: 0.001)
+        XCTAssertEqual(cpuStats.sampleCount, 2)
+        XCTAssertEqual(try store.loadTemperatureStatistics(since: date.addingTimeInterval(100)).first?.sampleCount, 1)
         try store.touchAgent(at: date)
         XCTAssertEqual(try store.lastAgentHeartbeat(), date)
         try store.eraseHistory()
         XCTAssertTrue(try store.loadApps(since: date.addingTimeInterval(-30)).isEmpty)
         XCTAssertTrue(try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300)).isEmpty)
+        XCTAssertTrue(try store.loadTemperatureStatistics(since: date.addingTimeInterval(-300)).isEmpty)
         XCTAssertTrue(try store.loadExternalPower(since: date.addingTimeInterval(-30), resolution: 15).isEmpty)
     }
 

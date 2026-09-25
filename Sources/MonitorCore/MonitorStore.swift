@@ -326,6 +326,22 @@ public final class MonitorStore {
         return points
     }
 
+    public func loadTemperatureStatistics(since: Date) throws -> [MonitorTemperatureStatistics] {
+        let statement = try prepare("SELECT sensor_id, MIN(celsius), AVG(celsius), MAX(celsius), COUNT(*) FROM temperature_sample WHERE bucket >= ? GROUP BY sensor_id ORDER BY sensor_id")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, Int64(since.timeIntervalSince1970))
+        var statistics: [MonitorTemperatureStatistics] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            statistics.append(MonitorTemperatureStatistics(
+                id: String(cString: sqlite3_column_text(statement, 0)),
+                minimumCelsius: sqlite3_column_double(statement, 1),
+                averageCelsius: sqlite3_column_double(statement, 2),
+                maximumCelsius: sqlite3_column_double(statement, 3),
+                sampleCount: Int(sqlite3_column_int(statement, 4))))
+        }
+        return statistics
+    }
+
     public func touchAgent(at date: Date = Date()) throws {
         let statement = try prepare("INSERT INTO agent_heartbeat(id, ts) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET ts = excluded.ts")
         defer { sqlite3_finalize(statement) }

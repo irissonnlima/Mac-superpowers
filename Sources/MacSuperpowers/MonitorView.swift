@@ -10,6 +10,7 @@ struct MonitorView: View {
     @State private var showsHistory = false
     @State private var selectedApp: MonitorAppTotal?
     @State private var showingEraseConfirmation = false
+    @State private var selectedThermalGroup = "CPU"
 
     private var inset: CGFloat { width < 760 ? 24 : 40 }
     private var usesSideBySidePanels: Bool { width >= 620 }
@@ -40,7 +41,6 @@ struct MonitorView: View {
                     summary
                     categoryPicker
                     comparisonSection
-                    if model.category == .thermal { thermalSensorSection }
                     footer
                 }
                 .frame(maxWidth: 1050, alignment: .leading)
@@ -178,61 +178,141 @@ struct MonitorView: View {
     }
 
     private var thermalSensorSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Sensores de temperatura").font(.title3.bold())
+                Text("Sensores").font(.title3.bold())
                 Spacer()
-                Text("\(model.snapshot?.temperatures.count ?? 0) disponíveis")
+                Text("\(thermalComponents.reduce(0) { $0 + $1.sensorIDs.count })")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack(spacing: 8) {
-                Image(systemName: "thermometer.medium").foregroundStyle(Color.accentColor)
-                Text("Estado térmico do macOS: \(thermalName(model.snapshot?.thermalState ?? -1))")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-            }
-            Text("Leituras reais em °C, atualizadas a cada minuto. Os sensores variam por modelo e versão do macOS; códigos do hardware aparecem abaixo.")
+            Text("Mínimo, média e máximo no período · °C")
                 .font(.caption).foregroundStyle(.secondary)
-            let sensors = model.snapshot?.temperatures ?? []
-            if sensors.isEmpty {
-                ContentUnavailableView("Temperaturas indisponíveis", systemImage: "thermometer.medium",
-                                       description: Text("Este Mac não expôs sensores de temperatura legíveis. O estado térmico do macOS continua disponível."))
-                    .frame(height: 150)
-            } else {
-                ForEach(thermalGroups, id: \.self) { group in
-                    let items = sensors.filter { thermalGroup($0.id) == group }
-                    if !items.isEmpty {
+            Label("Estado do Mac: \(thermalName(model.snapshot?.thermalState ?? -1))", systemImage: "thermometer.medium")
+                .font(.caption)
+                .foregroundStyle(Color.accentColor)
+            if !thermalComponents.isEmpty {
+                Picker("Componente", selection: Binding(
+                    get: { selectedThermalComponent?.name ?? selectedThermalGroup },
+                    set: { selectThermalComponent($0) }
+                )) {
+                    ForEach(thermalComponents) { component in
+                        Text("\(component.name) · \(component.sensorIDs.count)").tag(component.name)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    if thermalComponents.isEmpty {
+                        ContentUnavailableView("Temperaturas indisponíveis", systemImage: "thermometer.medium",
+                                               description: Text("Este Mac não expôs sensores de temperatura legíveis."))
+                    }
+                    if let component = selectedThermalComponent {
                         VStack(alignment: .leading, spacing: 9) {
-                            Text(group).font(.subheadline.weight(.semibold))
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 9)], spacing: 9) {
-                                ForEach(items) { sensor in
-                                    Button { model.selectedTemperatureSensorID = sensor.id } label: {
-                                        HStack(spacing: 10) {
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text(thermalLabel(sensor.id))
-                                                    .font(.subheadline.weight(.medium)).lineLimit(1)
-                                                Text(sensor.id).font(.caption2.monospaced())
-                                                    .foregroundStyle(.secondary).lineLimit(1)
-                                            }
-                                            Spacer(minLength: 4)
-                                            Text("\(sensor.celsius.formatted(.number.precision(.fractionLength(1)))) °C")
-                                                .font(.subheadline.monospacedDigit().weight(.semibold))
-                                        }
-                                        .padding(12)
-                                        .background(model.selectedTemperatureSensorID == sensor.id
-                                                    ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.045),
-                                                    in: RoundedRectangle(cornerRadius: 12))
-                                    }
-                                    .buttonStyle(.plain)
+                            Text(component.name).font(.subheadline.weight(.semibold))
+                            if let minimum = component.minimumCelsius,
+                               let average = component.averageCelsius,
+                               let maximum = component.maximumCelsius {
+                                HStack(spacing: 6) {
+                                    thermalStatistic("Mín", value: minimum)
+                                    thermalStatistic("Média", value: average)
+                                    thermalStatistic("Máx", value: maximum)
                                 }
+                            } else {
+                                Text("Sem histórico neste período")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            ForEach(component.sensorIDs, id: \.self) { identifier in
+                                Button { model.selectedTemperatureSensorID = identifier } label: {
+                                    HStack(spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(thermalLabel(identifier))
+                                                .font(.caption.weight(.medium)).lineLimit(1)
+                                            Text(identifier).font(.caption2.monospaced())
+                                                .foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        Spacer(minLength: 4)
+                                        Text(temperatureText(model.snapshot?.temperatures.first(where: { $0.id == identifier })?.celsius))
+                                            .font(.caption.monospacedDigit().weight(.semibold))
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(model.selectedTemperatureSensorID == identifier
+                                                ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.045),
+                                                in: RoundedRectangle(cornerRadius: 9))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
+                .padding(.bottom, 16)
             }
         }
         .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: panelHeight, alignment: .top)
         .appSurface()
+    }
+
+    private func thermalStatistic(_ label: String, value: Double) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(temperatureText(value)).font(.caption.monospacedDigit().weight(.semibold))
+                .lineLimit(1).minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func temperatureText(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return "\(value.formatted(.number.precision(.fractionLength(1)))) °C"
+    }
+
+    private struct ThermalComponent: Identifiable {
+        let name: String
+        let sensorIDs: [String]
+        let minimumCelsius: Double?
+        let averageCelsius: Double?
+        let maximumCelsius: Double?
+        var id: String { name }
+    }
+
+    private var thermalComponents: [ThermalComponent] {
+        let identifiers = Set((model.snapshot?.temperatures ?? []).map(\.id))
+            .union(model.temperatureStatistics.map(\.id))
+        return thermalGroups.compactMap { group in
+            let sensorIDs = identifiers.filter { thermalGroup($0) == group }.sorted()
+            guard !sensorIDs.isEmpty else { return nil }
+            let readings = model.temperatureStatistics.filter { thermalGroup($0.id) == group }
+            let count = readings.reduce(0) { $0 + $1.sampleCount }
+            return ThermalComponent(
+                name: group, sensorIDs: sensorIDs,
+                minimumCelsius: readings.map(\.minimumCelsius).min(),
+                averageCelsius: count > 0
+                    ? readings.reduce(0) { $0 + $1.averageCelsius * Double($1.sampleCount) } / Double(count) : nil,
+                maximumCelsius: readings.map(\.maximumCelsius).max())
+        }
+    }
+
+    private var selectedThermalComponent: ThermalComponent? {
+        thermalComponents.first(where: { $0.name == selectedThermalGroup }) ?? thermalComponents.first
+    }
+
+    private func selectThermalComponent(_ group: String) {
+        selectedThermalGroup = group
+        guard let component = thermalComponents.first(where: { $0.name == group }),
+              !component.sensorIDs.contains(model.selectedTemperatureSensorID ?? "") else { return }
+        let preferred: [String]
+        switch group {
+        case "CPU": preferred = ["SMC:TCMz", "SMC:TCMb"]
+        case "GPU": preferred = ["SMC:TRDX"]
+        case "Bateria": preferred = ["Battery:Pack"]
+        default: preferred = []
+        }
+        model.selectedTemperatureSensorID = preferred.first(where: component.sensorIDs.contains)
+            ?? component.sensorIDs.first
     }
 
     private var thermalGroups: [String] {
@@ -333,14 +413,20 @@ struct MonitorView: View {
         if usesSideBySidePanels {
             HStack(alignment: .top, spacing: 16) {
                 chartSection.frame(maxWidth: .infinity)
-                appSection.frame(maxWidth: .infinity)
+                secondarySection.frame(maxWidth: .infinity)
             }
         } else {
             VStack(spacing: 16) {
                 chartSection
-                appSection
+                secondarySection
             }
         }
+    }
+
+    @ViewBuilder
+    private var secondarySection: some View {
+        if model.category == .thermal { thermalSensorSection }
+        else { appSection }
     }
 
     private var batteryLivePowerSection: some View {
