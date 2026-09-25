@@ -29,8 +29,8 @@ struct MonitorView: View {
                 .padding(.bottom, 18)
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    categoryPicker
                     summary
+                    categoryPicker
                     if model.category == .thermal { thermalSensorSection }
                     chartSection
                     appSection
