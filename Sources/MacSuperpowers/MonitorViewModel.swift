@@ -77,6 +77,7 @@ final class MonitorViewModel: ObservableObject {
     private var started = false
     private var samplingInFlight = false
     private var lastHistoryRefresh = Date.distantPast
+    private var lastLiveTemperatureStored: Date?
     private let agentPlist = "com.macsuperpowers.monitor.plist"
 
     var hasBattery: Bool { snapshot?.batteryPercent != nil || points.contains { $0.batteryPercent != nil } }
@@ -197,6 +198,12 @@ final class MonitorViewModel: ObservableObject {
                     self.previous = sample
                     self.snapshot = sample
                     self.interval = delta
+                    if let sampledAt = sample.temperatureSampleDate,
+                       sampledAt != self.lastLiveTemperatureStored,
+                       !sample.temperatures.isEmpty {
+                        try? self.store?.insertTemperatures(sample.temperatures, date: sampledAt)
+                        self.lastLiveTemperatureStored = sampledAt
+                    }
                     if self.selectedTemperatureSensorID == nil {
                         self.selectedTemperatureSensorID = sample.temperatures.first(where: { $0.id == "SMC:TCMz" })?.id
                             ?? sample.temperatures.first(where: { $0.id == "SMC:TCMb" })?.id
