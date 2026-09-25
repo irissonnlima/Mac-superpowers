@@ -52,6 +52,8 @@ public final class MonitorCollector: @unchecked Sendable {
         )
         point.batteryPowerWatts = snapshot.batteryPowerWatts
         try? store.insert(point)
+        try? store.insertExternalPower(inputWatts: snapshot.inputPowerWatts,
+                                       systemLoadWatts: snapshot.systemLoadWatts, at: snapshot.date)
         if let sampledAt = snapshot.temperatureSampleDate, sampledAt != lastTemperatureStored {
             try? store.insertTemperatures(snapshot.temperatures, date: sampledAt)
             lastTemperatureStored = sampledAt

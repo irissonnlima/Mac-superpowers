@@ -68,6 +68,7 @@ public final class MonitorStore {
         if !hasColumn("p_core_equivalents", in: "system_sample") { try exec("ALTER TABLE system_sample ADD COLUMN p_core_equivalents REAL") }
         if !hasColumn("e_core_equivalents", in: "system_sample") { try exec("ALTER TABLE system_sample ADD COLUMN e_core_equivalents REAL") }
         try exec("CREATE TABLE IF NOT EXISTS battery_power_sample (ts REAL PRIMARY KEY, watts REAL NOT NULL)")
+        try exec("CREATE TABLE IF NOT EXISTS external_power_sample (ts REAL PRIMARY KEY, input_watts REAL, system_load_watts REAL)")
         // A versão anterior do agente usa INSERT posicional em system_sample.
         // Mantenha a tabela original com 14 colunas durante uma atualização do app.
         if hasColumn("battery_power_watts", in: "system_sample") {
@@ -158,6 +159,19 @@ public final class MonitorStore {
         guard sqlite3_step(power) == SQLITE_DONE else { throw failure() }
     }
 
+    public func insertExternalPower(inputWatts: Double?, systemLoadWatts: Double?, at date: Date) throws {
+        guard inputWatts?.isFinite != false, systemLoadWatts?.isFinite != false,
+              inputWatts != nil || systemLoadWatts != nil else { return }
+        let statement = try prepare("INSERT OR REPLACE INTO external_power_sample (ts, input_watts, system_load_watts) VALUES (?, ?, ?)")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
+        if let inputWatts { sqlite3_bind_double(statement, 2, inputWatts) }
+        else { sqlite3_bind_null(statement, 2) }
+        if let systemLoadWatts { sqlite3_bind_double(statement, 3, systemLoadWatts) }
+        else { sqlite3_bind_null(statement, 3) }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }
+    }
+
     public func insert(_ buckets: [MonitorMinuteBucket]) throws {
         guard !buckets.isEmpty else { return }
         try exec("BEGIN IMMEDIATE")
@@ -231,6 +245,22 @@ public final class MonitorStore {
         }
         for index in points.indices {
             points[index].batteryPowerWatts = wattsByBucket[Int64(points[index].date.timeIntervalSince1970)]
+        }
+        return points
+    }
+
+    public func loadExternalPower(since: Date, resolution: TimeInterval) throws -> [MonitorExternalPowerPoint] {
+        let statement = try prepare("SELECT CAST(ts / ? AS INTEGER) * ?, AVG(input_watts), AVG(system_load_watts) FROM external_power_sample WHERE ts >= ? GROUP BY 1 ORDER BY 1")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, resolution)
+        sqlite3_bind_double(statement, 2, resolution)
+        sqlite3_bind_double(statement, 3, since.timeIntervalSince1970)
+        var points: [MonitorExternalPowerPoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            points.append(MonitorExternalPowerPoint(
+                date: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                inputWatts: sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 1),
+                systemLoadWatts: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 2)))
         }
         return points
     }
@@ -314,6 +344,7 @@ public final class MonitorStore {
         let cutoff = now.addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
         try exec("DELETE FROM system_sample WHERE ts < \(cutoff)")
         try exec("DELETE FROM battery_power_sample WHERE ts < \(cutoff)")
+        try exec("DELETE FROM external_power_sample WHERE ts < \(cutoff)")
         try exec("DELETE FROM app_minute WHERE minute < \(Int64(cutoff / 60))")
         try exec("DELETE FROM temperature_sample WHERE bucket < \(Int64(cutoff))")
         try exec("PRAGMA wal_checkpoint(PASSIVE)")
@@ -322,6 +353,7 @@ public final class MonitorStore {
     public func eraseHistory() throws {
         try exec("DELETE FROM system_sample")
         try exec("DELETE FROM battery_power_sample")
+        try exec("DELETE FROM external_power_sample")
         try exec("DELETE FROM app_minute")
         try exec("DELETE FROM temperature_sample")
         try exec("PRAGMA wal_checkpoint(TRUNCATE)")

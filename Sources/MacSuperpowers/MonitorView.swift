@@ -15,8 +15,8 @@ struct MonitorView: View {
     private var usesSideBySidePanels: Bool { width >= 620 }
     private var panelHeight: CGFloat {
         switch model.category {
-        case .battery: 580
-        case .cpu: 510
+        case .battery: 620
+        case .cpu: 525
         default: 450
         }
     }
@@ -145,7 +145,7 @@ struct MonitorView: View {
                          value: model.category == .thermal ? selectedTemperatureValue
                             : (model.hasBattery ? batteryValue : thermalName(model.snapshot?.thermalState ?? 0)),
                          detail: model.category == .thermal ? "sensor selecionado"
-                            : (model.hasBattery ? (model.snapshot?.onBattery == true ? "descarregando" : "na tomada") : "estado do sistema"))
+                            : (model.hasBattery ? batterySummaryDetail : "estado do sistema"))
         }
         .padding(.vertical, 18)
         .appSurface()
@@ -164,6 +164,12 @@ struct MonitorView: View {
     private var batteryValue: String {
         guard let value = model.snapshot?.batteryPercent else { return "—" }
         return "\(Int(value.rounded()))%"
+    }
+
+    private var batterySummaryDetail: String {
+        if model.snapshot?.onBattery == true { return "descarregando" }
+        if let watts = model.snapshot?.inputPowerWatts { return "\(wattsText(watts)) da fonte" }
+        return "na tomada"
     }
 
     private var selectedTemperatureValue: String {
@@ -262,18 +268,15 @@ struct MonitorView: View {
 
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(chartTitle).font(.title3.bold())
-                    Text(chartExplanation).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(chartTitle).font(.title3.bold())
+                Text(chartExplanation).font(.caption).foregroundStyle(.secondary)
                 if model.category == .cpu, let levels = model.snapshot?.performanceLevels, !levels.isEmpty {
                     Text(levels.map { "\($0.name) \($0.logicalCores)" }.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
+            if model.category == .battery { batteryLivePowerSection }
             if model.category == .thermal, model.selectedTemperatureSensorID != nil,
                model.temperaturePoints.isEmpty {
                 ContentUnavailableView("Aguardando histórico", systemImage: "chart.xyaxis.line",
@@ -285,7 +288,7 @@ struct MonitorView: View {
                     .frame(height: 210)
             } else {
                 chart
-                    .frame(height: 230)
+                    .frame(height: model.category == .battery ? 180 : 230)
                     .chartXScale(domain: Date().addingTimeInterval(-model.range.duration)...Date())
             }
             if model.category == .cpu, canSplitCores,
@@ -316,7 +319,7 @@ struct MonitorView: View {
                 }
                 .padding(.top, 10)
             }
-            if model.category == .battery { batteryPowerSection }
+            if model.category == .battery { batteryPowerHistorySection }
             Spacer(minLength: 0)
         }
         .padding(20)
@@ -340,27 +343,59 @@ struct MonitorView: View {
         }
     }
 
-    private var batteryPowerSection: some View {
+    private var batteryLivePowerSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             Divider()
-            HStack(alignment: .firstTextBaseline) {
-                Text("Potência da bateria").font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(batteryPowerValue).font(.subheadline.monospacedDigit().weight(.semibold))
-            }
-            Text(batteryPowerExplanation).font(.caption).foregroundStyle(.secondary)
-            if model.snapshot?.onBattery == false, let watts = model.snapshot?.adapterRatedWatts {
-                HStack {
-                    Text("Fonte conectada").font(.subheadline)
-                    Spacer()
-                    Text("até \(watts) W").font(.subheadline.monospacedDigit())
+            Text("Potência agora").font(.subheadline.weight(.semibold))
+            if model.snapshot?.onBattery == false {
+                powerRow("Da fonte", wattsText(model.snapshot?.inputPowerWatts), prominent: true)
+                powerRow("Consumo do Mac", wattsText(model.snapshot?.systemLoadWatts))
+                powerRow("Carga da bateria", batteryPowerValue)
+                if let watts = model.snapshot?.adapterRatedWatts {
+                    Text("Fonte: até \(watts) W de capacidade nominal")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
-                Text("A potência da fonte é sua capacidade nominal. O consumo instantâneo do Mac na tomada não é exposto por esta medição.")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                Text(model.snapshot?.inputPowerWatts == nil
+                     ? "Potência de entrada indisponível neste Mac."
+                     : "Potência medida na entrada do Mac; a leitura do controlador pode demorar a atualizar.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                powerRow("Bateria para o Mac", batteryPowerValue, prominent: true)
+                Text(batteryPowerExplanation).font(.caption).foregroundStyle(.secondary)
             }
-            if model.points.contains(where: { $0.batteryPowerWatts != nil }) {
-                Text("No gráfico: acima de zero carrega; abaixo de zero descarrega.")
-                    .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private var batteryPowerHistorySection: some View {
+        if model.snapshot?.onBattery == false,
+           model.externalPowerPoints.contains(where: { $0.inputWatts != nil }) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Histórico · entrada e consumo do Mac")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Chart {
+                    ForEach(model.externalPowerPoints) { point in
+                        if let watts = point.inputWatts {
+                            LineMark(x: .value("Hora", point.date), y: .value("W", watts),
+                                     series: .value("Fluxo", "Entrada"))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        if let watts = point.systemLoadWatts {
+                            LineMark(x: .value("Hora", point.date), y: .value("W", watts),
+                                     series: .value("Fluxo", "Mac"))
+                                .foregroundStyle(Color.secondary)
+                                .lineStyle(StrokeStyle(dash: [4, 3]))
+                        }
+                    }
+                }
+                .frame(height: 75)
+                .chartXScale(domain: Date().addingTimeInterval(-model.range.duration)...Date())
+            }
+        } else if model.snapshot?.onBattery != false,
+               model.points.contains(where: { $0.batteryPowerWatts != nil }) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Histórico · carga e descarga da bateria")
+                    .font(.caption2).foregroundStyle(.secondary)
                 Chart(model.points.compactMap { point -> (Date, Double)? in
                     point.batteryPowerWatts.map { (point.date, $0) }
                 }, id: \.0) { point in
@@ -373,9 +408,23 @@ struct MonitorView: View {
         }
     }
 
+    private func powerRow(_ label: String, _ value: String, prominent: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).font(prominent ? .subheadline.weight(.semibold) : .subheadline)
+            Spacer(minLength: 4)
+            Text(value).font(prominent ? .headline.monospacedDigit() : .subheadline.monospacedDigit())
+                .lineLimit(1)
+        }
+    }
+
+    private func wattsText(_ watts: Double?) -> String {
+        guard let watts else { return "—" }
+        return "\(watts.formatted(.number.precision(.fractionLength(1)))) W"
+    }
+
     private var batteryPowerValue: String {
         guard let watts = model.snapshot?.batteryPowerWatts else { return "—" }
-        return "\(abs(watts).formatted(.number.precision(.fractionLength(1)))) W"
+        return wattsText(abs(watts))
     }
 
     private var batteryPowerExplanation: String {
@@ -468,18 +517,19 @@ struct MonitorView: View {
 
     private var appSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
                     Text(showsHistory ? "Processos no período" : "Processos agora")
                         .font(.title3.bold())
-                    Text(listExplanation)
+                    Spacer(minLength: 4)
+                    Toggle("Sistema", isOn: $showsSystemProcesses)
+                        .toggleStyle(.checkbox)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .help("Incluir processos do sistema")
                 }
-                Spacer()
-                Toggle("Incluir sistema", isOn: $showsSystemProcesses)
-                    .toggleStyle(.checkbox)
+                Text(listExplanation)
                     .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 20)
             ScrollView {

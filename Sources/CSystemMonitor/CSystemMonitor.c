@@ -17,6 +17,16 @@ static double mach_seconds(uint64_t ticks) {
     return (double)ticks * (double)scale.numer / (double)scale.denom / 1000000000.0;
 }
 
+static int read_telemetry_watts(CFDictionaryRef telemetry, CFStringRef key, double *watts) {
+    CFTypeRef value = CFDictionaryGetValue(telemetry, key);
+    int64_t milliwatts = 0;
+    if (!value || CFGetTypeID(value) != CFNumberGetTypeID()
+        || !CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &milliwatts)
+        || milliwatts < 0 || milliwatts > 1000000) return 0;
+    *watts = (double)milliwatts / 1000.0;
+    return 1;
+}
+
 int32_t ms_list_pids(int32_t *buffer, int32_t capacity) {
     if (!buffer || capacity <= 0) return 0;
     int bytes = proc_listpids(PROC_ALL_PIDS, 0, buffer, capacity * (int32_t)sizeof(int32_t));
@@ -114,6 +124,13 @@ int32_t ms_read_battery(MSBatterySample *result) {
             }
             if (current) CFRelease(current);
             if (voltage) CFRelease(voltage);
+            CFTypeRef telemetry = IORegistryEntryCreateCFProperty(service, CFSTR("PowerTelemetryData"), kCFAllocatorDefault, 0);
+            if (telemetry && CFGetTypeID(telemetry) == CFDictionaryGetTypeID()) {
+                CFDictionaryRef data = (CFDictionaryRef)telemetry;
+                result->input_power_available = read_telemetry_watts(data, CFSTR("SystemPowerIn"), &result->input_power_watts);
+                result->system_load_available = read_telemetry_watts(data, CFSTR("SystemLoad"), &result->system_load_watts);
+            }
+            if (telemetry) CFRelease(telemetry);
             IOObjectRelease(service);
         }
         if (!result->on_battery) {

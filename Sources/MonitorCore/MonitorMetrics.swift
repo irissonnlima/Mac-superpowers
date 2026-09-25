@@ -24,6 +24,13 @@ public struct MonitorTemperaturePoint: Sendable, Identifiable {
     public var id: Date { date }
 }
 
+public struct MonitorExternalPowerPoint: Sendable, Identifiable {
+    public let date: Date
+    public let inputWatts: Double?
+    public let systemLoadWatts: Double?
+    public var id: Date { date }
+}
+
 public struct MonitorProcess: Sendable {
     public let pid: Int32
     public let startTime: UInt64
@@ -52,6 +59,8 @@ public struct MonitorSnapshot: Sendable {
     public let batteryPercent: Double?
     public var batteryPowerWatts: Double? = nil
     public var adapterRatedWatts: Int? = nil
+    public var inputPowerWatts: Double? = nil
+    public var systemLoadWatts: Double? = nil
     public let onBattery: Bool
     public let charging: Bool
     public let lowPowerMode: Bool

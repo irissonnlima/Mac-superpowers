@@ -81,7 +81,7 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let sidebarWidth = min(248, max(226, geometry.size.width * 0.24))
+            let sidebarWidth = min(216, max(196, geometry.size.width * 0.21))
             let contentWidth = max(0, geometry.size.width - sidebarWidth)
 
             ZStack {
@@ -192,7 +192,7 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 24)
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 14)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 

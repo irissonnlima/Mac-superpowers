@@ -60,6 +60,7 @@ final class MonitorViewModel: ObservableObject {
     @Published private(set) var points: [MonitorSystemPoint] = []
     @Published private(set) var totals: [MonitorAppTotal] = []
     @Published private(set) var temperaturePoints: [MonitorTemperaturePoint] = []
+    @Published private(set) var externalPowerPoints: [MonitorExternalPowerPoint] = []
     @Published var selectedTemperatureSensorID: String? {
         didSet { refreshTemperatureHistory() }
     }
@@ -133,6 +134,7 @@ final class MonitorViewModel: ObservableObject {
             points = []
             totals = []
             temperaturePoints = []
+            externalPowerPoints = []
         } catch { notice = "Não foi possível apagar o histórico: \(error.localizedDescription)" }
     }
 
@@ -201,6 +203,8 @@ final class MonitorViewModel: ObservableObject {
                     if let watts = sample.batteryPowerWatts {
                         try? self.store?.insertBatteryPower(watts, at: sample.date)
                     }
+                    try? self.store?.insertExternalPower(inputWatts: sample.inputPowerWatts,
+                                                         systemLoadWatts: sample.systemLoadWatts, at: sample.date)
                     if let sampledAt = sample.temperatureSampleDate,
                        sampledAt != self.lastLiveTemperatureStored,
                        !sample.temperatures.isEmpty {
@@ -224,6 +228,7 @@ final class MonitorViewModel: ObservableObject {
         do {
             points = try store.loadSystem(since: since, resolution: range.resolution)
             totals = try store.loadApps(since: since)
+            externalPowerPoints = try store.loadExternalPower(since: since, resolution: range.resolution)
             refreshTemperatureHistory()
             lastHistoryRefresh = Date()
         } catch { notice = "Não foi possível ler o histórico: \(error.localizedDescription)" }

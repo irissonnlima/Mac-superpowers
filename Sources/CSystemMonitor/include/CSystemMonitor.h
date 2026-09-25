@@ -32,6 +32,10 @@ typedef struct {
     int32_t power_available;
     double power_watts; /* positivo = carga; negativo = descarga da bateria */
     int32_t adapter_watts; /* capacidade nominal, não consumo instantâneo */
+    int32_t input_power_available;
+    double input_power_watts; /* potência que entra no Mac pelo adaptador */
+    int32_t system_load_available;
+    double system_load_watts; /* parcela usada pelo Mac, excluindo carga da bateria */
 } MSBatterySample;
 
 typedef struct {

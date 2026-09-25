@@ -81,6 +81,9 @@ public final class MonitorSampler: @unchecked Sendable {
         )
         snapshot.batteryPowerWatts = hasBattery && battery.power_available != 0 ? battery.power_watts : nil
         snapshot.adapterRatedWatts = hasBattery && battery.adapter_watts > 0 ? Int(battery.adapter_watts) : nil
+        snapshot.inputPowerWatts = hasBattery && battery.on_battery == 0 && battery.input_power_available != 0
+            ? battery.input_power_watts : nil
+        snapshot.systemLoadWatts = hasBattery && battery.system_load_available != 0 ? battery.system_load_watts : nil
         snapshot.temperatures = lastTemperatures
         snapshot.temperatureSampleDate = lastTemperatureSample == .distantPast ? nil : lastTemperatureSample
         return snapshot

@@ -65,6 +65,7 @@ final class MonitorCoreTests: XCTestCase {
                                        efficiencyCoreEquivalents: 0.4)
         point.batteryPowerWatts = -12.5
         try store.insert(point)
+        try store.insertExternalPower(inputWatts: 18.4, systemLoadWatts: 12.2, at: date.addingTimeInterval(1))
         try store.insertTemperatures([
             MonitorTemperature(id: "SMC:TCMz", celsius: 63.4, source: 1),
             MonitorTemperature(id: "Battery:Pack", celsius: 32.1, source: 3)
@@ -84,6 +85,10 @@ final class MonitorCoreTests: XCTestCase {
         XCTAssertEqual(points[0].cpuPercent, 23)
         XCTAssertEqual(points[0].performanceCoreEquivalents, 1.2)
         XCTAssertEqual(points[0].batteryPowerWatts, -12.5)
+        let externalPower = try store.loadExternalPower(since: date.addingTimeInterval(-30), resolution: 15)
+        XCTAssertEqual(externalPower.count, 1)
+        XCTAssertEqual(externalPower[0].inputWatts ?? 0, 18.4, accuracy: 0.001)
+        XCTAssertEqual(externalPower[0].systemLoadWatts ?? 0, 12.2, accuracy: 0.001)
         XCTAssertEqual(apps.count, 1)
         XCTAssertEqual(apps[0].cpuSeconds, 207)
         XCTAssertEqual(apps[0].averageMemoryBytes, 1_000)
@@ -95,6 +100,7 @@ final class MonitorCoreTests: XCTestCase {
         try store.eraseHistory()
         XCTAssertTrue(try store.loadApps(since: date.addingTimeInterval(-30)).isEmpty)
         XCTAssertTrue(try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300)).isEmpty)
+        XCTAssertTrue(try store.loadExternalPower(since: date.addingTimeInterval(-30), resolution: 15).isEmpty)
     }
 
     func testOldAgentCanStillWriteWhilePowerHistoryIsEnabled() throws {
