@@ -7,6 +7,7 @@ public final class MonitorCollector: @unchecked Sendable {
     private var buckets: [String: MonitorMinuteBucket] = [:]
     private var currentMinute: Int64?
     private var lastPrune = Date.distantPast
+    private var lastTemperatureStored: Date?
 
     public init(store: MonitorStore) { self.store = store }
 
@@ -50,6 +51,10 @@ public final class MonitorCollector: @unchecked Sendable {
             efficiencyCoreEquivalents: eEquivalents
         )
         try? store.insert(point)
+        if let sampledAt = snapshot.temperatureSampleDate, sampledAt != lastTemperatureStored {
+            try? store.insertTemperatures(snapshot.temperatures, date: sampledAt)
+            lastTemperatureStored = sampledAt
+        }
         if snapshot.date.timeIntervalSince(lastPrune) > 24 * 3600 {
             try? store.prune(now: snapshot.date)
             lastPrune = snapshot.date

@@ -31,6 +31,7 @@ struct MonitorView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     categoryPicker
                     summary
+                    if model.category == .thermal { thermalSensorSection }
                     chartSection
                     appSection
                     footer
@@ -133,9 +134,11 @@ struct MonitorView: View {
             summaryValue("Disco livre", value: bytes(model.snapshot?.diskFreeBytes ?? 0),
                          detail: "volume de inicialização")
             Divider().frame(height: 42)
-            summaryValue(model.hasBattery ? "Bateria" : "Térmico",
-                         value: model.hasBattery ? batteryValue : thermalName(model.snapshot?.thermalState ?? 0),
-                         detail: model.hasBattery ? (model.snapshot?.onBattery == true ? "descarregando" : "na tomada") : "estado do sistema")
+            summaryValue(model.category == .thermal ? "Temperatura" : (model.hasBattery ? "Bateria" : "Térmico"),
+                         value: model.category == .thermal ? selectedTemperatureValue
+                            : (model.hasBattery ? batteryValue : thermalName(model.snapshot?.thermalState ?? 0)),
+                         detail: model.category == .thermal ? "sensor selecionado"
+                            : (model.hasBattery ? (model.snapshot?.onBattery == true ? "descarregando" : "na tomada") : "estado do sistema"))
         }
         .padding(.vertical, 18)
         .appSurface()
@@ -156,6 +159,100 @@ struct MonitorView: View {
         return "\(Int(value.rounded()))%"
     }
 
+    private var selectedTemperatureValue: String {
+        guard let sensor = model.snapshot?.temperatures.first(where: { $0.id == model.selectedTemperatureSensorID }) else { return "—" }
+        return "\(sensor.celsius.formatted(.number.precision(.fractionLength(1)))) °C"
+    }
+
+    private var thermalSensorSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sensores de temperatura").font(.title3.bold())
+                Spacer()
+                Text("\(model.snapshot?.temperatures.count ?? 0) disponíveis")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "thermometer.medium").foregroundStyle(Color.accentColor)
+                Text("Estado térmico do macOS: \(thermalName(model.snapshot?.thermalState ?? -1))")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+            }
+            Text("Leituras reais em °C, atualizadas a cada minuto. Os sensores variam por modelo e versão do macOS; códigos do hardware aparecem abaixo.")
+                .font(.caption).foregroundStyle(.secondary)
+            let sensors = model.snapshot?.temperatures ?? []
+            if sensors.isEmpty {
+                ContentUnavailableView("Temperaturas indisponíveis", systemImage: "thermometer.medium",
+                                       description: Text("Este Mac não expôs sensores de temperatura legíveis. O estado térmico do macOS continua disponível."))
+                    .frame(height: 150)
+            } else {
+                ForEach(thermalGroups, id: \.self) { group in
+                    let items = sensors.filter { thermalGroup($0.id) == group }
+                    if !items.isEmpty {
+                        VStack(alignment: .leading, spacing: 9) {
+                            Text(group).font(.subheadline.weight(.semibold))
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 9)], spacing: 9) {
+                                ForEach(items) { sensor in
+                                    Button { model.selectedTemperatureSensorID = sensor.id } label: {
+                                        HStack(spacing: 10) {
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(thermalLabel(sensor.id))
+                                                    .font(.subheadline.weight(.medium)).lineLimit(1)
+                                                Text(sensor.id).font(.caption2.monospaced())
+                                                    .foregroundStyle(.secondary).lineLimit(1)
+                                            }
+                                            Spacer(minLength: 4)
+                                            Text("\(sensor.celsius.formatted(.number.precision(.fractionLength(1)))) °C")
+                                                .font(.subheadline.monospacedDigit().weight(.semibold))
+                                        }
+                                        .padding(12)
+                                        .background(model.selectedTemperatureSensorID == sensor.id
+                                                    ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.045),
+                                                    in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .appSurface()
+    }
+
+    private var thermalGroups: [String] {
+        ["CPU", "GPU", "Memória", "Armazenamento", "Bateria", "SoC e alimentação", "Outros sensores"]
+    }
+
+    private func thermalGroup(_ identifier: String) -> String {
+        if identifier == "Battery:Pack" || identifier.hasPrefix("SMC:TB") { return "Bateria" }
+        if identifier.hasPrefix("HID:gas gauge battery") { return "Bateria" }
+        if identifier.hasPrefix("HID:NAND") { return "Armazenamento" }
+        guard identifier.hasPrefix("SMC:") else { return "SoC e alimentação" }
+        let key = String(identifier.dropFirst(4))
+        if key.hasPrefix("TC") || key.hasPrefix("Tp") || key.hasPrefix("Te") { return "CPU" }
+        if key.hasPrefix("TG") || key.hasPrefix("Tg") || key.hasPrefix("TRD") { return "GPU" }
+        if ["TVm", "Tm0", "TMVR"].contains(where: key.hasPrefix) { return "Memória" }
+        if ["T5", "Ts1", "TH0"].contains(where: key.hasPrefix) { return "Armazenamento" }
+        if ["TP", "Ts0", "TV", "TA", "TW", "TI", "TD"].contains(where: key.hasPrefix) { return "SoC e alimentação" }
+        return "Outros sensores"
+    }
+
+    private func thermalLabel(_ identifier: String) -> String {
+        switch identifier {
+        case "SMC:TCMz": return "Ponto mais quente da CPU"
+        case "SMC:TCMb": return "Máximo da CPU"
+        case "SMC:TRDX": return "Ponto mais quente da GPU"
+        case "Battery:Pack": return "Conjunto da bateria"
+        default:
+            if identifier.hasPrefix("SMC:TB") { return "Bateria · \(identifier.dropFirst(4))" }
+            if identifier.hasPrefix("HID:") { return String(identifier.dropFirst(4)) }
+            return "Sensor \(identifier.dropFirst(4))"
+        }
+    }
+
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -170,7 +267,12 @@ struct MonitorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            if model.points.isEmpty {
+            if model.category == .thermal, model.selectedTemperatureSensorID != nil,
+               model.temperaturePoints.isEmpty {
+                ContentUnavailableView("Aguardando histórico", systemImage: "chart.xyaxis.line",
+                                       description: Text("A primeira leitura deste sensor aparecerá após a coleta em segundo plano."))
+                    .frame(height: 210)
+            } else if model.points.isEmpty && (model.category != .thermal || model.temperaturePoints.isEmpty) {
                 ContentUnavailableView("Aguardando medições", systemImage: "chart.xyaxis.line",
                                        description: Text("O gráfico começará após as primeiras amostras."))
                     .frame(height: 210)
@@ -251,12 +353,21 @@ struct MonitorView: View {
             }
             .chartYScale(domain: 0...100)
         case .thermal:
-            Chart(model.points) { point in
-                LineMark(x: .value("Hora", point.date), y: .value("Estado", point.thermalState))
-                    .foregroundStyle(Color.accentColor)
-                    .interpolationMethod(.stepEnd)
+            if model.selectedTemperatureSensorID != nil {
+                Chart(model.temperaturePoints) { point in
+                    LineMark(x: .value("Hora", point.date), y: .value("°C", point.celsius))
+                        .foregroundStyle(Color.accentColor)
+                    PointMark(x: .value("Hora", point.date), y: .value("°C", point.celsius))
+                        .foregroundStyle(Color.accentColor)
+                }
+            } else {
+                Chart(model.points) { point in
+                    LineMark(x: .value("Hora", point.date), y: .value("Estado", point.thermalState))
+                        .foregroundStyle(Color.accentColor)
+                        .interpolationMethod(.stepEnd)
+                }
+                .chartYScale(domain: 0...3)
             }
-            .chartYScale(domain: 0...3)
         }
     }
 
@@ -266,7 +377,7 @@ struct MonitorView: View {
         case .memory: "Memória em uso"
         case .disk: "Atividade de leitura e gravação"
         case .battery: "Carga da bateria"
-        case .thermal: "Estado térmico"
+        case .thermal: model.selectedTemperatureSensorID.map { "Histórico · \(thermalLabel($0))" } ?? "Estado térmico"
         }
     }
 
@@ -276,7 +387,9 @@ struct MonitorView: View {
         case .memory: "Memória física usada, aproximada; não é a soma dos processos."
         case .disk: "MB/s de processos observados; áreas protegidas podem ficar fora."
         case .battery: "Carga medida; intervalos sem coleta não representam carga zero."
-        case .thermal: "0 normal · 1 elevado · 2 alto · 3 crítico. Não é temperatura em °C."
+        case .thermal: model.selectedTemperatureSensorID == nil
+            ? "Estado térmico do macOS: 0 normal · 1 elevado · 2 alto · 3 crítico."
+            : "Temperatura do sensor selecionado em °C. O histórico guarda uma leitura a cada 5 minutos."
         }
     }
 

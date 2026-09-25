@@ -13,7 +13,7 @@ Responder a duas perguntas distintas: **o que está acontecendo agora?** e **qua
 - Usar a superfície translúcida atual, a cor de destaque do sistema e poucas caixas. Nas curvas sobrepostas, diferenciar séries também por traço e rótulo, não apenas por cor. Um cartão só é necessário para resumo ou detalhe de um app.
 - Cada seção apresenta um gráfico temporal, uma explicação curta da unidade e uma lista de apps ordenável por **agora**, **total no intervalo** ou **pico**. Uma linha mostra ícone/nome, valor atual, acumulado, tendência e a indicação `medido`, `estimado` ou `sem acesso`.
 - Clicar num app abre seu detalhe: gráfico próprio, CPU total e por tipo de núcleo quando disponível, pico e média de memória, leitura/escrita, períodos de execução e comparação com o período anterior. Apps auxiliares são agrupados quando há vínculo verificável com o mesmo bundle; processos sem vínculo ficam em **Outros processos**, sem atribuição forçada.
-- Bateria é omitida em Macs sem bateria. Temperatura em graus só aparece se uma fonte pública, estável e verificável for encontrada; o primeiro lançamento usa **estado térmico** (`normal`, `elevado`, `alto`, `crítico`).
+- Bateria é omitida em Macs sem bateria. A tela **Térmico** mostra temperaturas em °C para cada sensor SMC/HID que o hardware permitir ler, com o código original do sensor. A leitura da bateria usa o registro local quando disponível. O estado térmico (`normal`, `elevado`, `alto`, `crítico`) permanece separado das temperaturas.
 
 ## Métricas e unidades
 
@@ -23,7 +23,7 @@ Responder a duas perguntas distintas: **o que está acontecendo agora?** e **qua
 | Memória | Memória física total, uso do sistema, swap e pegada física por processo | Pico, média e **GB·h** por app; GB·h expressa ocupação mantida, não RAM adicional instalada |
 | Disco | Leitura e escrita em MB/s; espaço disponível do volume como dado separado | GB lidos e escritos por app; uso de espaço por pasta continua no mapa de Disco |
 | Bateria | Carga %, carregando/descarregando, alimentação externa e modo de pouca energia | Curva de carga, trechos de descarga, taxa `%/h` e tempo observado; não converter queda de % diretamente em consumo de cada app |
-| Térmico | Estado térmico fornecido pelo macOS | Tempo em cada estado e correlação temporal com CPU e bateria |
+| Térmico | Temperatura por sensor em °C e estado térmico do macOS | Uma leitura por sensor a cada 5 minutos e histórico de 30 dias |
 
 ### Regra de CPU acumulada
 
@@ -53,7 +53,7 @@ Os contadores de processo são cumulativos e devem ser convertidos da unidade de
 - **CPU e memória do sistema:** estatísticas Mach (`host_statistics64`, `host_processor_info`), memória física de `ProcessInfo` e `sysctlbyname` para topologia. O total de pegadas de processos não deve ser apresentado como se fosse idêntico ao uso total de memória do Mac.
 - **Armazenamento:** espaço do volume via `FileManager`/APFS; atividade por processo pelos contadores de I/O. O mapa de Disco continua responsável por ocupação por pasta.
 - **Bateria:** `IOPowerSources` para capacidade atual, estado da alimentação e informações opcionais. Nem todas as chaves estão disponíveis em todos os Macs. `ProcessInfo.isLowPowerModeEnabled` registra mudança de modo de energia.
-- **Térmico:** `ProcessInfo.thermalState`; é uma classificação, não uma temperatura em °C.
+- **Térmico:** `ProcessInfo.thermalState` é uma classificação, não uma temperatura em °C. Sensores SMC e HID são descobertos no hardware e lidos no máximo uma vez por minuto; valores ausentes ou implausíveis não aparecem. Os nomes exatos e a cobertura variam por modelo. Essas interfaces de sensores não têm contrato público de estabilidade e podem não ser aceitas na Mac App Store; validar a distribuição comercial antes do lançamento. Nenhuma leitura requer senha de administrador.
 - **Energia por app:** `rusage_info_v6` pode expor energia de CPU em nanojoules em sistemas compatíveis. Mostrar como **energia de CPU medida pelo kernel** somente quando houver dados válidos; ela não representa toda a energia de tela, GPU, rede e periféricos. Sem esse contador, a lista de apps durante uma descarga é apenas **atividade coincidente**, nunca “culpados pela bateria”.
 
 ## Coleta e histórico

@@ -73,6 +73,8 @@ public final class MonitorStore {
         if !hasColumn("battery_energy_samples", in: "app_minute") { try exec("ALTER TABLE app_minute ADD COLUMN battery_energy_samples INTEGER NOT NULL DEFAULT 0") }
         try exec("CREATE INDEX IF NOT EXISTS app_minute_by_key ON app_minute(app_key, minute)")
         try exec("CREATE TABLE IF NOT EXISTS agent_heartbeat (id INTEGER PRIMARY KEY CHECK(id = 1), ts REAL NOT NULL)")
+        try exec("CREATE TABLE IF NOT EXISTS temperature_sample (bucket INTEGER NOT NULL, sensor_id TEXT NOT NULL, celsius REAL NOT NULL, PRIMARY KEY(bucket, sensor_id))")
+        try exec("CREATE INDEX IF NOT EXISTS temperature_sample_by_sensor ON temperature_sample(sensor_id, bucket)")
     }
 
     deinit { sqlite3_close(db) }
@@ -220,6 +222,42 @@ public final class MonitorStore {
         return result
     }
 
+    public func insertTemperatures(_ sensors: [MonitorTemperature], date: Date) throws {
+        guard !sensors.isEmpty else { return }
+        let bucket = Int64(date.timeIntervalSince1970 / 300) * 300
+        try exec("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("INSERT OR REPLACE INTO temperature_sample(bucket, sensor_id, celsius) VALUES (?, ?, ?)")
+            defer { sqlite3_finalize(statement) }
+            for sensor in sensors where sensor.celsius.isFinite {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                sqlite3_bind_int64(statement, 1, bucket)
+                bind(sensor.id, to: statement, at: 2)
+                sqlite3_bind_double(statement, 3, sensor.celsius)
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func loadTemperatures(sensorID: String, since: Date) throws -> [MonitorTemperaturePoint] {
+        let statement = try prepare("SELECT bucket, celsius FROM temperature_sample WHERE sensor_id = ? AND bucket >= ? ORDER BY bucket")
+        defer { sqlite3_finalize(statement) }
+        bind(sensorID, to: statement, at: 1)
+        sqlite3_bind_int64(statement, 2, Int64(since.timeIntervalSince1970))
+        var points: [MonitorTemperaturePoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            points.append(MonitorTemperaturePoint(
+                date: Date(timeIntervalSince1970: TimeInterval(sqlite3_column_int64(statement, 0))),
+                celsius: sqlite3_column_double(statement, 1)))
+        }
+        return points
+    }
+
     public func touchAgent(at date: Date = Date()) throws {
         let statement = try prepare("INSERT INTO agent_heartbeat(id, ts) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET ts = excluded.ts")
         defer { sqlite3_finalize(statement) }
@@ -238,12 +276,14 @@ public final class MonitorStore {
         let cutoff = now.addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
         try exec("DELETE FROM system_sample WHERE ts < \(cutoff)")
         try exec("DELETE FROM app_minute WHERE minute < \(Int64(cutoff / 60))")
+        try exec("DELETE FROM temperature_sample WHERE bucket < \(Int64(cutoff))")
         try exec("PRAGMA wal_checkpoint(PASSIVE)")
     }
 
     public func eraseHistory() throws {
         try exec("DELETE FROM system_sample")
         try exec("DELETE FROM app_minute")
+        try exec("DELETE FROM temperature_sample")
         try exec("PRAGMA wal_checkpoint(TRUNCATE)")
     }
 }

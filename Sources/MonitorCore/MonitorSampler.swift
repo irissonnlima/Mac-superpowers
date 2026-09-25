@@ -4,6 +4,8 @@ import Foundation
 
 public final class MonitorSampler: @unchecked Sendable {
     private var appCache: [String: (key: String, name: String)] = [:]
+    private var lastTemperatureSample = Date.distantPast
+    private var lastTemperatures: [MonitorTemperature] = []
     public let performanceLevels: [MonitorPerformanceLevel]
 
     public init() {
@@ -49,8 +51,23 @@ public final class MonitorSampler: @unchecked Sendable {
                 cpuEnergyJoules: raw.has_energy != 0 ? raw.cpu_energy_joules : nil
             ))
         }
-        return MonitorSnapshot(
-            date: Date(), uptime: ProcessInfo.processInfo.systemUptime,
+        let now = Date()
+        if now.timeIntervalSince(lastTemperatureSample) >= 60 {
+            var sensors = [MSTemperatureSample](repeating: MSTemperatureSample(), count: 256)
+            let read = max(0, min(sensors.count, Int(ms_read_temperatures(&sensors, Int32(sensors.count)))))
+            var unique: [String: MonitorTemperature] = [:]
+            for sensor in sensors.prefix(read) {
+                let id = withUnsafePointer(to: sensor.identifier) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
+                }
+                guard !id.isEmpty, sensor.celsius.isFinite else { continue }
+                unique[id] = MonitorTemperature(id: id, celsius: sensor.celsius, source: Int(sensor.source))
+            }
+            lastTemperatures = unique.values.sorted { $0.id < $1.id }
+            lastTemperatureSample = now
+        }
+        var snapshot = MonitorSnapshot(
+            date: now, uptime: ProcessInfo.processInfo.systemUptime,
             busyTicks: system.busy_ticks, totalTicks: system.total_ticks,
             physicalBytes: system.physical_bytes, usedMemoryBytes: system.used_bytes,
             diskTotalBytes: total, diskFreeBytes: free,
@@ -62,6 +79,9 @@ public final class MonitorSampler: @unchecked Sendable {
             processes: processes, performanceLevels: performanceLevels,
             inaccessibleProcessCount: inaccessible
         )
+        snapshot.temperatures = lastTemperatures
+        snapshot.temperatureSampleDate = lastTemperatureSample == .distantPast ? nil : lastTemperatureSample
+        return snapshot
     }
 
     private func identity(for path: String, pid: Int32) -> (key: String, name: String) {

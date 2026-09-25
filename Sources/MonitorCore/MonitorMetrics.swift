@@ -6,6 +6,24 @@ public struct MonitorPerformanceLevel: Sendable, Identifiable {
     public let logicalCores: Int
 }
 
+public struct MonitorTemperature: Sendable, Identifiable {
+    public let id: String
+    public let celsius: Double
+    public let source: Int
+
+    public init(id: String, celsius: Double, source: Int) {
+        self.id = id
+        self.celsius = celsius
+        self.source = source
+    }
+}
+
+public struct MonitorTemperaturePoint: Sendable, Identifiable {
+    public let date: Date
+    public let celsius: Double
+    public var id: Date { date }
+}
+
 public struct MonitorProcess: Sendable {
     public let pid: Int32
     public let startTime: UInt64
@@ -39,6 +57,8 @@ public struct MonitorSnapshot: Sendable {
     public let processes: [MonitorProcess]
     public let performanceLevels: [MonitorPerformanceLevel]
     public let inaccessibleProcessCount: Int
+    public var temperatures: [MonitorTemperature] = []
+    public var temperatureSampleDate: Date? = nil
 }
 
 public struct MonitorAppActivity: Sendable, Identifiable {

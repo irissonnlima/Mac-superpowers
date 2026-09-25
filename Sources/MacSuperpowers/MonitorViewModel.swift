@@ -59,6 +59,10 @@ final class MonitorViewModel: ObservableObject {
     @Published private(set) var interval: MonitorInterval?
     @Published private(set) var points: [MonitorSystemPoint] = []
     @Published private(set) var totals: [MonitorAppTotal] = []
+    @Published private(set) var temperaturePoints: [MonitorTemperaturePoint] = []
+    @Published var selectedTemperatureSensorID: String? {
+        didSet { refreshTemperatureHistory() }
+    }
     @Published private(set) var backgroundActive = false
     @Published private(set) var backgroundPending = false
     @Published private(set) var backgroundHealthy = false
@@ -127,6 +131,7 @@ final class MonitorViewModel: ObservableObject {
             try store?.eraseHistory()
             points = []
             totals = []
+            temperaturePoints = []
         } catch { notice = "Não foi possível apagar o histórico: \(error.localizedDescription)" }
     }
 
@@ -192,6 +197,11 @@ final class MonitorViewModel: ObservableObject {
                     self.previous = sample
                     self.snapshot = sample
                     self.interval = delta
+                    if self.selectedTemperatureSensorID == nil {
+                        self.selectedTemperatureSensorID = sample.temperatures.first(where: { $0.id == "SMC:TCMz" })?.id
+                            ?? sample.temperatures.first(where: { $0.id == "SMC:TCMb" })?.id
+                            ?? sample.temperatures.first?.id
+                    }
                 }
                 if self.visible, Date().timeIntervalSince(self.lastHistoryRefresh) > 15 { self.refreshHistory() }
             }
@@ -204,7 +214,17 @@ final class MonitorViewModel: ObservableObject {
         do {
             points = try store.loadSystem(since: since, resolution: range.resolution)
             totals = try store.loadApps(since: since)
+            refreshTemperatureHistory()
             lastHistoryRefresh = Date()
         } catch { notice = "Não foi possível ler o histórico: \(error.localizedDescription)" }
+    }
+
+    private func refreshTemperatureHistory() {
+        guard let store, let selectedTemperatureSensorID else {
+            temperaturePoints = []
+            return
+        }
+        temperaturePoints = (try? store.loadTemperatures(sensorID: selectedTemperatureSensorID,
+                                                         since: Date().addingTimeInterval(-range.duration))) ?? []
     }
 }

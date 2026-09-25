@@ -31,11 +31,18 @@ typedef struct {
     double percent;
 } MSBatterySample;
 
+typedef struct {
+    char identifier[64];
+    double celsius;
+    int32_t source; /* 1 = SMC, 2 = HID, 3 = bateria */
+} MSTemperatureSample;
+
 int32_t ms_list_pids(int32_t *buffer, int32_t capacity);
 int32_t ms_read_process(int32_t pid, MSProcessSample *result);
 int32_t ms_read_system(MSSystemSample *result);
 int32_t ms_read_battery(MSBatterySample *result);
 int32_t ms_performance_level_count(void);
 int32_t ms_performance_level(int32_t index, char *name, int32_t name_capacity);
+int32_t ms_read_temperatures(MSTemperatureSample *buffer, int32_t capacity);
 
 #endif

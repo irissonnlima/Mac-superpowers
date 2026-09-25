@@ -63,6 +63,10 @@ final class MonitorCoreTests: XCTestCase {
                                        performanceCoreEquivalents: 1.2,
                                        efficiencyCoreEquivalents: 0.4)
         try store.insert(point)
+        try store.insertTemperatures([
+            MonitorTemperature(id: "SMC:TCMz", celsius: 63.4, source: 1),
+            MonitorTemperature(id: "Battery:Pack", celsius: 32.1, source: 3)
+        ], date: date)
         var activity = MonitorAppActivity(id: "com.example.Test", name: "Teste", isSystem: false)
         activity.cpuSeconds = 207
         activity.performanceCPUSeconds = 100
@@ -80,9 +84,13 @@ final class MonitorCoreTests: XCTestCase {
         XCTAssertEqual(apps.count, 1)
         XCTAssertEqual(apps[0].cpuSeconds, 207)
         XCTAssertEqual(apps[0].averageMemoryBytes, 1_000)
+        let temperatures = try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300))
+        XCTAssertEqual(temperatures.count, 1)
+        XCTAssertEqual(temperatures[0].celsius, 63.4, accuracy: 0.001)
         try store.touchAgent(at: date)
         XCTAssertEqual(try store.lastAgentHeartbeat(), date)
         try store.eraseHistory()
         XCTAssertTrue(try store.loadApps(since: date.addingTimeInterval(-30)).isEmpty)
+        XCTAssertTrue(try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300)).isEmpty)
     }
 }
