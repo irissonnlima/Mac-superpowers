@@ -115,8 +115,8 @@ struct MonitorView: View {
                         .foregroundStyle(model.category == category ? Color.primary : Color.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)
-                        .background(model.category == category ? Color.accentColor.opacity(0.15) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 11))
+                        .background(model.category == category ? Color.primary.opacity(0.16) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
