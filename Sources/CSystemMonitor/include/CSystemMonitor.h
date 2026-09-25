@@ -29,6 +29,9 @@ typedef struct {
     int32_t charging;
     int32_t on_battery;
     double percent;
+    int32_t power_available;
+    double power_watts; /* positivo = carga; negativo = descarga da bateria */
+    int32_t adapter_watts; /* capacidade nominal, não consumo instantâneo */
 } MSBatterySample;
 
 typedef struct {

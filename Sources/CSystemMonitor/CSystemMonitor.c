@@ -6,6 +6,7 @@
 #include <sys/sysctl.h>
 #include <IOKit/ps/IOPowerSources.h>
 #include <IOKit/ps/IOPSKeys.h>
+#include <IOKit/IOKitLib.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
 #include <stdio.h>
@@ -97,6 +98,35 @@ int32_t ms_read_battery(MSBatterySample *result) {
     }
     CFRelease(sources);
     CFRelease(blob);
+    if (result->available) {
+        io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"));
+        if (service) {
+            CFTypeRef current = IORegistryEntryCreateCFProperty(service, CFSTR("InstantAmperage"), kCFAllocatorDefault, 0);
+            CFTypeRef voltage = IORegistryEntryCreateCFProperty(service, CFSTR("Voltage"), kCFAllocatorDefault, 0);
+            int64_t milliamps = 0, millivolts = 0;
+            if (current && voltage && CFGetTypeID(current) == CFNumberGetTypeID()
+                && CFGetTypeID(voltage) == CFNumberGetTypeID()
+                && CFNumberGetValue((CFNumberRef)current, kCFNumberSInt64Type, &milliamps)
+                && CFNumberGetValue((CFNumberRef)voltage, kCFNumberSInt64Type, &millivolts)
+                && milliamps > -50000 && milliamps < 50000 && millivolts > 5000 && millivolts < 30000) {
+                result->power_available = 1;
+                result->power_watts = (double)milliamps * (double)millivolts / 1000000.0;
+            }
+            if (current) CFRelease(current);
+            if (voltage) CFRelease(voltage);
+            IOObjectRelease(service);
+        }
+        if (!result->on_battery) {
+            CFDictionaryRef adapter = IOPSCopyExternalPowerAdapterDetails();
+            if (adapter) {
+                CFTypeRef value = CFDictionaryGetValue(adapter, CFSTR(kIOPSPowerAdapterWattsKey));
+                if (value && CFGetTypeID(value) == CFNumberGetTypeID()) {
+                    CFNumberGetValue((CFNumberRef)value, kCFNumberIntType, &result->adapter_watts);
+                }
+                CFRelease(adapter);
+            }
+        }
+    }
     return result->available;
 }
 

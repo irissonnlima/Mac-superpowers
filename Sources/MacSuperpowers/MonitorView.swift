@@ -12,6 +12,14 @@ struct MonitorView: View {
     @State private var showingEraseConfirmation = false
 
     private var inset: CGFloat { width < 760 ? 24 : 40 }
+    private var usesSideBySidePanels: Bool { width >= 620 }
+    private var panelHeight: CGFloat {
+        switch model.category {
+        case .battery: 580
+        case .cpu: 510
+        default: 450
+        }
+    }
     private var canSplitCores: Bool {
         let names = model.snapshot?.performanceLevels.map { $0.name.lowercased() } ?? []
         return names.count == 2 && names.contains("efficiency")
@@ -31,9 +39,8 @@ struct MonitorView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     summary
                     categoryPicker
+                    comparisonSection
                     if model.category == .thermal { thermalSensorSection }
-                    chartSection
-                    appSection
                     footer
                 }
                 .frame(maxWidth: 1050, alignment: .leading)
@@ -309,9 +316,75 @@ struct MonitorView: View {
                 }
                 .padding(.top, 10)
             }
+            if model.category == .battery { batteryPowerSection }
+            Spacer(minLength: 0)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: panelHeight, alignment: .top)
         .appSurface()
+    }
+
+    @ViewBuilder
+    private var comparisonSection: some View {
+        if usesSideBySidePanels {
+            HStack(alignment: .top, spacing: 16) {
+                chartSection.frame(maxWidth: .infinity)
+                appSection.frame(maxWidth: .infinity)
+            }
+        } else {
+            VStack(spacing: 16) {
+                chartSection
+                appSection
+            }
+        }
+    }
+
+    private var batteryPowerSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+            HStack(alignment: .firstTextBaseline) {
+                Text("Potência da bateria").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(batteryPowerValue).font(.subheadline.monospacedDigit().weight(.semibold))
+            }
+            Text(batteryPowerExplanation).font(.caption).foregroundStyle(.secondary)
+            if model.snapshot?.onBattery == false, let watts = model.snapshot?.adapterRatedWatts {
+                HStack {
+                    Text("Fonte conectada").font(.subheadline)
+                    Spacer()
+                    Text("até \(watts) W").font(.subheadline.monospacedDigit())
+                }
+                Text("A potência da fonte é sua capacidade nominal. O consumo instantâneo do Mac na tomada não é exposto por esta medição.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            if model.points.contains(where: { $0.batteryPowerWatts != nil }) {
+                Text("No gráfico: acima de zero carrega; abaixo de zero descarrega.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Chart(model.points.compactMap { point -> (Date, Double)? in
+                    point.batteryPowerWatts.map { (point.date, $0) }
+                }, id: \.0) { point in
+                    LineMark(x: .value("Hora", point.0), y: .value("W", point.1))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(height: 75)
+                .chartXScale(domain: Date().addingTimeInterval(-model.range.duration)...Date())
+            }
+        }
+    }
+
+    private var batteryPowerValue: String {
+        guard let watts = model.snapshot?.batteryPowerWatts else { return "—" }
+        return "\(abs(watts).formatted(.number.precision(.fractionLength(1)))) W"
+    }
+
+    private var batteryPowerExplanation: String {
+        guard let snapshot = model.snapshot, let watts = snapshot.batteryPowerWatts else {
+            return "Este Mac não disponibilizou uma leitura de potência da bateria."
+        }
+        if watts > 0.1 { return "Entrando na bateria · potência aproximada de carga." }
+        if watts < -0.1 { return "Saindo da bateria · potência aproximada de descarga." }
+        return snapshot.onBattery ? "Sem fluxo mensurável nesta amostra." : "Bateria sem carga ou descarga mensurável nesta amostra."
     }
 
     @ViewBuilder
@@ -397,7 +470,7 @@ struct MonitorView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(showsHistory ? "Apps no período" : "Apps agora")
+                    Text(showsHistory ? "Processos no período" : "Processos agora")
                         .font(.title3.bold())
                     Text(listExplanation)
                         .font(.caption)
@@ -408,28 +481,35 @@ struct MonitorView: View {
                     .toggleStyle(.checkbox)
                     .font(.caption)
             }
-            VStack(spacing: 0) {
-                if showsHistory {
-                    let items = sortedTotals
-                    if items.isEmpty { emptyList }
-                    ForEach(Array(items.prefix(50).enumerated()), id: \.element.id) { index, app in
-                        if index > 0 { Divider().padding(.leading, 50) }
-                        Button { selectedApp = app } label: {
-                            appRow(name: app.name, key: app.id, value: historicValue(app), detail: historicDetail(app))
+            .padding(.horizontal, 20)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if showsHistory {
+                        let items = sortedTotals
+                        if items.isEmpty { emptyList }
+                        ForEach(Array(items.prefix(50).enumerated()), id: \.element.id) { index, app in
+                            if index > 0 { Divider().padding(.leading, 50) }
+                            Button { selectedApp = app } label: {
+                                appRow(name: app.name, key: app.id, value: historicValue(app), detail: historicDetail(app))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                    }
-                } else {
-                    let items = sortedLive
-                    if items.isEmpty { emptyList }
-                    ForEach(Array(items.prefix(50).enumerated()), id: \.element.id) { index, app in
-                        if index > 0 { Divider().padding(.leading, 50) }
-                        appRow(name: app.name, key: app.id, value: liveValue(app), detail: liveDetail(app))
+                    } else {
+                        let items = sortedLive
+                        if items.isEmpty { emptyList }
+                        ForEach(Array(items.prefix(50).enumerated()), id: \.element.id) { index, app in
+                            if index > 0 { Divider().padding(.leading, 50) }
+                            appRow(name: app.name, key: app.id, value: liveValue(app), detail: liveDetail(app))
+                        }
                     }
                 }
             }
-            .appSurface()
+            .frame(maxHeight: .infinity)
         }
+        .padding(.top, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: panelHeight, alignment: .top)
+        .appSurface()
     }
 
     private var emptyList: some View {
@@ -475,7 +555,8 @@ struct MonitorView: View {
             case .cpu, .thermal: $0.cpuSeconds > $1.cpuSeconds
             case .memory: $0.physicalBytes > $1.physicalBytes
             case .disk: $0.readBytes + $0.writtenBytes > $1.readBytes + $1.writtenBytes
-            case .battery: $0.cpuEnergyJoules > $1.cpuEnergyJoules
+            case .battery: ($0.energyAvailable ? $0.cpuEnergyJoules : $0.cpuSeconds)
+                > ($1.energyAvailable ? $1.cpuEnergyJoules : $1.cpuSeconds)
             }
         }
     }
@@ -486,7 +567,7 @@ struct MonitorView: View {
             case .cpu, .thermal: $0.cpuSeconds > $1.cpuSeconds
             case .memory: $0.averageMemoryBytes > $1.averageMemoryBytes
             case .disk: $0.readBytes + $0.writtenBytes > $1.readBytes + $1.writtenBytes
-            case .battery: ($0.onBatteryCPUEnergyJoules ?? $0.onBatteryCPUSeconds) > ($1.onBatteryCPUEnergyJoules ?? $1.onBatteryCPUSeconds)
+        case .battery: ($0.cpuEnergyJoules ?? $0.cpuSeconds) > ($1.cpuEnergyJoules ?? $1.cpuSeconds)
             }
         }
     }
@@ -494,9 +575,9 @@ struct MonitorView: View {
     private var listExplanation: String {
         switch model.category {
         case .cpu: showsHistory ? "Tempo de núcleo acumulado; 1 core-h = 1 núcleo usado por 1 hora." : "100% equivale a um núcleo lógico ocupado."
-        case .memory: showsHistory ? "Média de memória física observada; toque para ver o pico." : "Pegada física dos processos do app, que não soma exatamente ao total do Mac."
-        case .disk: showsHistory ? "Bytes lidos e escritos no período." : "Atividade entre as duas últimas amostras."
-        case .battery: "Atividade medida enquanto a bateria descarregava; não prova a causa da descarga."
+        case .memory: showsHistory ? "Média física observada; toque para ver o pico." : "Pegada física e parcela da RAM do Mac."
+        case .disk: showsHistory ? "Bytes lidos e escritos no período." : "Leitura e gravação por segundo na última amostra."
+        case .battery: showsHistory ? "Energia de CPU observada; não equivale ao gasto total do app." : "Potência de CPU quando disponível; caso contrário, uso de CPU."
         case .thermal: "Apps mais ativos no período; atividade simultânea não prova causa do calor."
         }
     }
@@ -504,10 +585,11 @@ struct MonitorView: View {
     private func liveValue(_ app: MonitorAppActivity) -> String {
         switch model.category {
         case .cpu, .thermal: "\(Int((100 * app.cpuSeconds / max(0.1, model.interval?.elapsed ?? 1)).rounded()))%"
-        case .memory: bytes(app.physicalBytes)
-        case .disk: "\(bytes(app.readBytes + app.writtenBytes)) / amostra"
-        case .battery: model.snapshot?.onBattery == true && app.energyAvailable
-            ? "\(app.cpuEnergyJoules.formatted(.number.precision(.fractionLength(2)))) J" : "—"
+        case .memory: "\(bytes(app.physicalBytes)) · \(memoryPercent(Double(app.physicalBytes)))"
+        case .disk: "\(bytes(UInt64(Double(app.readBytes + app.writtenBytes) / max(0.1, model.interval?.elapsed ?? 1))))/s"
+        case .battery: app.energyAvailable
+            ? "\((app.cpuEnergyJoules / max(0.1, model.interval?.elapsed ?? 1)).formatted(.number.precision(.fractionLength(2)))) W"
+            : "\(Int((100 * app.cpuSeconds / max(0.1, model.interval?.elapsed ?? 1)).rounded()))% CPU"
         }
     }
 
@@ -521,10 +603,10 @@ struct MonitorView: View {
     private func historicValue(_ app: MonitorAppTotal) -> String {
         switch model.category {
         case .cpu, .thermal: "\((app.cpuSeconds / 3600).formatted(.number.precision(.fractionLength(2)))) core-h"
-        case .memory: bytes(UInt64(max(0, app.averageMemoryBytes)))
+        case .memory: "\(bytes(UInt64(max(0, app.averageMemoryBytes)))) · \(memoryPercent(app.averageMemoryBytes))"
         case .disk: bytes(app.readBytes + app.writtenBytes)
-        case .battery: app.onBatteryCPUEnergyJoules.map { "\($0.formatted(.number.precision(.fractionLength(1)))) J" }
-            ?? "\((app.onBatteryCPUSeconds / 3600).formatted(.number.precision(.fractionLength(2)))) core-h"
+        case .battery: app.cpuEnergyJoules.map { "\($0.formatted(.number.precision(.fractionLength(1)))) J" }
+            ?? "\((app.cpuSeconds / 3600).formatted(.number.precision(.fractionLength(2)))) core-h"
         }
     }
 
@@ -535,7 +617,7 @@ struct MonitorView: View {
             return "\(fastCoreName) \((p / 3600).formatted(.number.precision(.fractionLength(2)))) · Efficiency \((max(0, app.cpuSeconds - p) / 3600).formatted(.number.precision(.fractionLength(2)))) core-h"
         case .memory: return "Pico \(bytes(app.peakMemoryBytes))"
         case .disk: return "Leitura \(bytes(app.readBytes)) · gravação \(bytes(app.writtenBytes))"
-        case .battery: return "Durante a descarga · \((app.onBatteryCPUSeconds / 3600).formatted(.number.precision(.fractionLength(2)))) core-h de CPU"
+        case .battery: return "CPU na bateria: \((app.onBatteryCPUSeconds / 3600).formatted(.number.precision(.fractionLength(2)))) core-h"
         default: return "Acumulado no período selecionado"
         }
     }
@@ -589,6 +671,12 @@ struct MonitorView: View {
 
     private func bytes(_ value: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
+    }
+
+    private func memoryPercent(_ value: Double) -> String {
+        let total = Double(model.snapshot?.physicalBytes ?? model.points.last?.physicalBytes ?? 0)
+        guard total > 0 else { return "—%" }
+        return "\((100 * value / total).formatted(.number.precision(.fractionLength(1))))%"
     }
 
     private func thermalName(_ value: Int) -> String {

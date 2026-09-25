@@ -38,7 +38,7 @@ public final class MonitorCollector: @unchecked Sendable {
         let eEquivalents = splitLevels && !splitApps.isEmpty
             ? splitApps.reduce(0) { $0 + max(0, $1.cpuSeconds - $1.performanceCPUSeconds) } / max(0.001, interval?.elapsed ?? 0)
             : nil
-        let point = MonitorSystemPoint(
+        var point = MonitorSystemPoint(
             date: snapshot.date, cpuPercent: interval?.cpuPercent,
             usedMemoryBytes: snapshot.usedMemoryBytes, physicalBytes: snapshot.physicalBytes,
             diskFreeBytes: snapshot.diskFreeBytes,
@@ -50,6 +50,7 @@ public final class MonitorCollector: @unchecked Sendable {
             performanceCoreEquivalents: pEquivalents,
             efficiencyCoreEquivalents: eEquivalents
         )
+        point.batteryPowerWatts = snapshot.batteryPowerWatts
         try? store.insert(point)
         if let sampledAt = snapshot.temperatureSampleDate, sampledAt != lastTemperatureStored {
             try? store.insertTemperatures(snapshot.temperatures, date: sampledAt)

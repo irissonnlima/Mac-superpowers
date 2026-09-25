@@ -79,6 +79,8 @@ public final class MonitorSampler: @unchecked Sendable {
             processes: processes, performanceLevels: performanceLevels,
             inaccessibleProcessCount: inaccessible
         )
+        snapshot.batteryPowerWatts = hasBattery && battery.power_available != 0 ? battery.power_watts : nil
+        snapshot.adapterRatedWatts = hasBattery && battery.adapter_watts > 0 ? Int(battery.adapter_watts) : nil
         snapshot.temperatures = lastTemperatures
         snapshot.temperatureSampleDate = lastTemperatureSample == .distantPast ? nil : lastTemperatureSample
         return snapshot

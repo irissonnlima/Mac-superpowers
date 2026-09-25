@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import MonitorCore
 
@@ -54,7 +55,7 @@ final class MonitorCoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try MonitorStore(url: directory.appendingPathComponent("Monitor.sqlite"))
         let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let point = MonitorSystemPoint(date: date, cpuPercent: 23,
+        var point = MonitorSystemPoint(date: date, cpuPercent: 23,
                                        usedMemoryBytes: 2_000, physicalBytes: 4_000,
                                        diskFreeBytes: 5_000, readBytesPerSecond: 200,
                                        writtenBytesPerSecond: 100, batteryPercent: 75,
@@ -62,6 +63,7 @@ final class MonitorCoreTests: XCTestCase {
                                        coverage: 0.8,
                                        performanceCoreEquivalents: 1.2,
                                        efficiencyCoreEquivalents: 0.4)
+        point.batteryPowerWatts = -12.5
         try store.insert(point)
         try store.insertTemperatures([
             MonitorTemperature(id: "SMC:TCMz", celsius: 63.4, source: 1),
@@ -81,6 +83,7 @@ final class MonitorCoreTests: XCTestCase {
         XCTAssertEqual(points.count, 1)
         XCTAssertEqual(points[0].cpuPercent, 23)
         XCTAssertEqual(points[0].performanceCoreEquivalents, 1.2)
+        XCTAssertEqual(points[0].batteryPowerWatts, -12.5)
         XCTAssertEqual(apps.count, 1)
         XCTAssertEqual(apps[0].cpuSeconds, 207)
         XCTAssertEqual(apps[0].averageMemoryBytes, 1_000)
@@ -92,5 +95,60 @@ final class MonitorCoreTests: XCTestCase {
         try store.eraseHistory()
         XCTAssertTrue(try store.loadApps(since: date.addingTimeInterval(-30)).isEmpty)
         XCTAssertTrue(try store.loadTemperatures(sensorID: "SMC:TCMz", since: date.addingTimeInterval(-300)).isEmpty)
+    }
+
+    func testOldAgentCanStillWriteWhilePowerHistoryIsEnabled() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Monitor.sqlite")
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        let legacySchema = "CREATE TABLE system_sample (ts REAL PRIMARY KEY, cpu REAL, used_memory INTEGER NOT NULL, physical_memory INTEGER NOT NULL, disk_free INTEGER NOT NULL, read_rate REAL NOT NULL, write_rate REAL NOT NULL, battery REAL, on_battery INTEGER NOT NULL, charging INTEGER NOT NULL, thermal INTEGER NOT NULL, coverage REAL NOT NULL, p_core_equivalents REAL, e_core_equivalents REAL)"
+        XCTAssertEqual(sqlite3_exec(database, legacySchema, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        let store = try MonitorStore(url: url)
+        var point = MonitorSystemPoint(date: Date(timeIntervalSince1970: 1_700_000_000), cpuPercent: 20,
+                                       usedMemoryBytes: 100, physicalBytes: 200, diskFreeBytes: 300,
+                                       readBytesPerSecond: 0, writtenBytesPerSecond: 0,
+                                       batteryPercent: 50, onBattery: false, charging: true,
+                                       thermalState: 0, coverage: 1,
+                                       performanceCoreEquivalents: nil, efficiencyCoreEquivalents: nil)
+        point.batteryPowerWatts = 18.2
+        try store.insert(point)
+        let loaded = try XCTUnwrap(store.loadSystem(since: point.date.addingTimeInterval(-10), resolution: 10).first)
+        XCTAssertEqual(loaded.batteryPowerWatts ?? 0, 18.2, accuracy: 0.001)
+
+        var oldAgentDatabase: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &oldAgentDatabase), SQLITE_OK)
+        let oldInsert = "INSERT INTO system_sample VALUES (1700000020, 21, 100, 200, 300, 0, 0, 50, 0, 1, 0, 1, NULL, NULL)"
+        XCTAssertEqual(sqlite3_exec(oldAgentDatabase, oldInsert, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(oldAgentDatabase)
+        try store.insertBatteryPower(7.5, at: Date(timeIntervalSince1970: 1_700_000_021))
+        let mixedPoints = try store.loadSystem(since: point.date.addingTimeInterval(-10), resolution: 10)
+        XCTAssertEqual(mixedPoints.count, 2)
+        XCTAssertEqual(mixedPoints[1].batteryPowerWatts ?? 0, 7.5, accuracy: 0.001)
+    }
+
+    func testIntermediatePowerColumnMovesToCompatibleTable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("Monitor.sqlite")
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        let intermediateSchema = "CREATE TABLE system_sample (ts REAL PRIMARY KEY, cpu REAL, used_memory INTEGER NOT NULL, physical_memory INTEGER NOT NULL, disk_free INTEGER NOT NULL, read_rate REAL NOT NULL, write_rate REAL NOT NULL, battery REAL, on_battery INTEGER NOT NULL, charging INTEGER NOT NULL, thermal INTEGER NOT NULL, coverage REAL NOT NULL, p_core_equivalents REAL, e_core_equivalents REAL, battery_power_watts REAL)"
+        XCTAssertEqual(sqlite3_exec(database, intermediateSchema, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, "INSERT INTO system_sample VALUES (1700000000, 20, 100, 200, 300, 0, 0, 50, 0, 1, 0, 1, NULL, NULL, 18.2)", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        let store = try MonitorStore(url: url)
+        let loaded = try XCTUnwrap(store.loadSystem(since: Date(timeIntervalSince1970: 1_699_999_990), resolution: 10).first)
+        XCTAssertEqual(loaded.batteryPowerWatts ?? 0, 18.2, accuracy: 0.001)
+        var oldAgentDatabase: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &oldAgentDatabase), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(oldAgentDatabase, "INSERT INTO system_sample VALUES (1700000020, 21, 100, 200, 300, 0, 0, 50, 0, 1, 0, 1, NULL, NULL)", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(oldAgentDatabase)
     }
 }

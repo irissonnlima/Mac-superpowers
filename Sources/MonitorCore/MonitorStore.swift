@@ -67,6 +67,20 @@ public final class MonitorStore {
         try exec("CREATE TABLE IF NOT EXISTS system_sample (ts REAL PRIMARY KEY, cpu REAL, used_memory INTEGER NOT NULL, physical_memory INTEGER NOT NULL, disk_free INTEGER NOT NULL, read_rate REAL NOT NULL, write_rate REAL NOT NULL, battery REAL, on_battery INTEGER NOT NULL, charging INTEGER NOT NULL, thermal INTEGER NOT NULL, coverage REAL NOT NULL, p_core_equivalents REAL, e_core_equivalents REAL)")
         if !hasColumn("p_core_equivalents", in: "system_sample") { try exec("ALTER TABLE system_sample ADD COLUMN p_core_equivalents REAL") }
         if !hasColumn("e_core_equivalents", in: "system_sample") { try exec("ALTER TABLE system_sample ADD COLUMN e_core_equivalents REAL") }
+        try exec("CREATE TABLE IF NOT EXISTS battery_power_sample (ts REAL PRIMARY KEY, watts REAL NOT NULL)")
+        // A versão anterior do agente usa INSERT posicional em system_sample.
+        // Mantenha a tabela original com 14 colunas durante uma atualização do app.
+        if hasColumn("battery_power_watts", in: "system_sample") {
+            try exec("BEGIN IMMEDIATE")
+            do {
+                try exec("INSERT OR REPLACE INTO battery_power_sample (ts, watts) SELECT ts, battery_power_watts FROM system_sample WHERE battery_power_watts IS NOT NULL")
+                try exec("ALTER TABLE system_sample DROP COLUMN battery_power_watts")
+                try exec("COMMIT")
+            } catch {
+                try? exec("ROLLBACK")
+                throw error
+            }
+        }
         try exec("CREATE TABLE IF NOT EXISTS app_minute (minute INTEGER NOT NULL, app_key TEXT NOT NULL, name TEXT NOT NULL, is_system INTEGER NOT NULL, cpu_seconds REAL NOT NULL, p_cpu_seconds REAL NOT NULL, p_samples INTEGER NOT NULL, memory_byte_seconds REAL NOT NULL, observed_seconds REAL NOT NULL, peak_memory INTEGER NOT NULL, read_bytes INTEGER NOT NULL, written_bytes INTEGER NOT NULL, cpu_energy REAL NOT NULL, energy_samples INTEGER NOT NULL, battery_cpu_seconds REAL NOT NULL DEFAULT 0, battery_cpu_energy REAL NOT NULL DEFAULT 0, battery_energy_samples INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(minute, app_key))")
         if !hasColumn("battery_cpu_seconds", in: "app_minute") { try exec("ALTER TABLE app_minute ADD COLUMN battery_cpu_seconds REAL NOT NULL DEFAULT 0") }
         if !hasColumn("battery_cpu_energy", in: "app_minute") { try exec("ALTER TABLE app_minute ADD COLUMN battery_cpu_energy REAL NOT NULL DEFAULT 0") }
@@ -108,7 +122,7 @@ public final class MonitorStore {
     }
 
     public func insert(_ point: MonitorSystemPoint) throws {
-        let sql = "INSERT OR REPLACE INTO system_sample VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let sql = "INSERT OR REPLACE INTO system_sample (ts, cpu, used_memory, physical_memory, disk_free, read_rate, write_rate, battery, on_battery, charging, thermal, coverage, p_core_equivalents, e_core_equivalents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, point.date.timeIntervalSince1970)
@@ -130,6 +144,18 @@ public final class MonitorStore {
         if let value = point.efficiencyCoreEquivalents { sqlite3_bind_double(statement, 14, value) }
         else { sqlite3_bind_null(statement, 14) }
         guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }
+        if let watts = point.batteryPowerWatts {
+            try insertBatteryPower(watts, at: point.date)
+        }
+    }
+
+    public func insertBatteryPower(_ watts: Double, at date: Date) throws {
+        guard watts.isFinite else { return }
+        let power = try prepare("INSERT OR REPLACE INTO battery_power_sample (ts, watts) VALUES (?, ?)")
+        defer { sqlite3_finalize(power) }
+        sqlite3_bind_double(power, 1, date.timeIntervalSince1970)
+        sqlite3_bind_double(power, 2, watts)
+        guard sqlite3_step(power) == SQLITE_DONE else { throw failure() }
     }
 
     public func insert(_ buckets: [MonitorMinuteBucket]) throws {
@@ -193,6 +219,18 @@ public final class MonitorStore {
                 performanceCoreEquivalents: sqlite3_column_type(statement, 12) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 12),
                 efficiencyCoreEquivalents: sqlite3_column_type(statement, 13) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 13)
             ))
+        }
+        let power = try prepare("SELECT CAST(ts / ? AS INTEGER) * ?, AVG(watts) FROM battery_power_sample WHERE ts >= ? GROUP BY 1")
+        defer { sqlite3_finalize(power) }
+        sqlite3_bind_double(power, 1, resolution)
+        sqlite3_bind_double(power, 2, resolution)
+        sqlite3_bind_double(power, 3, since.timeIntervalSince1970)
+        var wattsByBucket: [Int64: Double] = [:]
+        while sqlite3_step(power) == SQLITE_ROW {
+            wattsByBucket[Int64(sqlite3_column_double(power, 0))] = sqlite3_column_double(power, 1)
+        }
+        for index in points.indices {
+            points[index].batteryPowerWatts = wattsByBucket[Int64(points[index].date.timeIntervalSince1970)]
         }
         return points
     }
@@ -275,6 +313,7 @@ public final class MonitorStore {
     public func prune(now: Date = Date()) throws {
         let cutoff = now.addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
         try exec("DELETE FROM system_sample WHERE ts < \(cutoff)")
+        try exec("DELETE FROM battery_power_sample WHERE ts < \(cutoff)")
         try exec("DELETE FROM app_minute WHERE minute < \(Int64(cutoff / 60))")
         try exec("DELETE FROM temperature_sample WHERE bucket < \(Int64(cutoff))")
         try exec("PRAGMA wal_checkpoint(PASSIVE)")
@@ -282,6 +321,7 @@ public final class MonitorStore {
 
     public func eraseHistory() throws {
         try exec("DELETE FROM system_sample")
+        try exec("DELETE FROM battery_power_sample")
         try exec("DELETE FROM app_minute")
         try exec("DELETE FROM temperature_sample")
         try exec("PRAGMA wal_checkpoint(TRUNCATE)")

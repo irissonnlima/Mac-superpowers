@@ -50,6 +50,8 @@ public struct MonitorSnapshot: Sendable {
     public let diskTotalBytes: UInt64
     public let diskFreeBytes: UInt64
     public let batteryPercent: Double?
+    public var batteryPowerWatts: Double? = nil
+    public var adapterRatedWatts: Int? = nil
     public let onBattery: Bool
     public let charging: Bool
     public let lowPowerMode: Bool
@@ -139,6 +141,7 @@ public struct MonitorSystemPoint: Sendable, Identifiable {
     public let readBytesPerSecond: Double
     public let writtenBytesPerSecond: Double
     public let batteryPercent: Double?
+    public var batteryPowerWatts: Double? = nil
     public let onBattery: Bool
     public let charging: Bool
     public let thermalState: Int

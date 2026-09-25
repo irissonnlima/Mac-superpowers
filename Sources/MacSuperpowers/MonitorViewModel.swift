@@ -198,6 +198,9 @@ final class MonitorViewModel: ObservableObject {
                     self.previous = sample
                     self.snapshot = sample
                     self.interval = delta
+                    if let watts = sample.batteryPowerWatts {
+                        try? self.store?.insertBatteryPower(watts, at: sample.date)
+                    }
                     if let sampledAt = sample.temperatureSampleDate,
                        sampledAt != self.lastLiveTemperatureStored,
                        !sample.temperatures.isEmpty {
